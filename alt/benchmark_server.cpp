@@ -2,20 +2,17 @@
 
 int main(int argc, char* argv[]) {
     try {
-        if (argc > 2) {
+        if (argc != 1) {
             bench::print_usage_server(argv[0]);
             return 1;
         }
 
-        uint16_t port = (argc >= 2) ? static_cast<uint16_t>(std::stoi(argv[1])) : bench::DEFAULT_PORT;
-        int server_fd = bench::create_listening_socket(port);
-        std::cerr << "[+] Server listening on port " << port << "\n";
+        int server_fd = bench::create_listening_socket();
 
-        sockaddr_storage client_addr{};
+        sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
         int client_fd = accept(server_fd, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
         if (client_fd < 0) bench::throw_errno("accept failed");
-        std::cerr << "[+] Client connected\n";
 
         std::vector<char> buffer(64 * 1024);
 
@@ -30,8 +27,10 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("client requested message size above MAX_MSG_SIZE");
             }
 
-            const uint64_t warmup_bytes = static_cast<uint64_t>(cfg.msg_size) * cfg.warmup_messages;
-            const uint64_t measured_bytes = static_cast<uint64_t>(cfg.msg_size) * cfg.measured_messages;
+            const uint64_t warmup_bytes = static_cast<uint64_t>(cfg.msg_size) *
+                                          cfg.warmup_messages;
+            const uint64_t measured_bytes = static_cast<uint64_t>(cfg.msg_size) *
+                                            cfg.measured_messages;
 
             if (!bench::drain_bytes(client_fd, warmup_bytes, buffer)) {
                 throw std::runtime_error("client disconnected during warmup");
@@ -48,7 +47,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        std::cerr << "[+] Benchmark complete\n";
         bench::close_fd(client_fd);
         bench::close_fd(server_fd);
         return 0;

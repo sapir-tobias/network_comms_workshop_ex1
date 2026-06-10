@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <limits>
 #include <netdb.h>
 #include <stdexcept>
 #include <string>
@@ -17,9 +16,27 @@
 namespace bench {
 
 constexpr uint16_t DEFAULT_PORT = 8080;
-constexpr uint32_t MIN_MSG_SIZE = 1;                 // 1 B
-constexpr uint32_t MAX_MSG_SIZE = 1u << 20;          // 1 MiB
-constexpr uint32_t WARMUP_MESSAGES = 256;
+constexpr uint32_t MIN_MSG_SIZE = 1;        // 1 byte
+constexpr uint32_t MAX_MSG_SIZE = 1u << 20; // 1 MiB
+
+/*
+ * Warm-up choice:
+ * Before timing each message size, the client sends a small fixed burst of
+ * messages. These messages are not included in the measured time. This reduces
+ * cold-start effects such as TCP buffer initialization, cache effects, and first
+ * scheduling delays. 256 messages is small compared to the measured phase, but
+ * enough to make every round start from a more stable state.
+ */
+constexpr uint64_t WARMUP_MESSAGES = 256;
+
+/*
+ * X choice:
+ * For every message size we try to send approximately TARGET_BYTES_PER_ROUND
+ * bytes in the measured phase. Thus X = target_bytes / msg_size. This keeps the
+ * amount of data comparable between sizes. For very small messages this would
+ * create too many system calls, so X is capped. For very large messages we keep
+ * at least a few repetitions so the measurement is not based on a single send.
+ */
 constexpr uint64_t TARGET_BYTES_PER_ROUND = 256ull * 1024ull * 1024ull; // 256 MiB
 constexpr uint64_t MIN_MESSAGES_PER_ROUND = 16;
 constexpr uint64_t MAX_MESSAGES_PER_ROUND = 8ull * 1024ull * 1024ull;
@@ -30,7 +47,8 @@ struct RoundConfig {
     uint64_t measured_messages;
 };
 
-inline uint64_t calculate_messages(uint32_t msg_size, uint64_t target_bytes = TARGET_BYTES_PER_ROUND) {
+inline uint64_t calculate_messages(uint32_t msg_size,
+                                   uint64_t target_bytes = TARGET_BYTES_PER_ROUND) {
     uint64_t x = target_bytes / msg_size;
     if (x < MIN_MESSAGES_PER_ROUND) x = MIN_MESSAGES_PER_ROUND;
     if (x > MAX_MESSAGES_PER_ROUND) x = MAX_MESSAGES_PER_ROUND;
@@ -40,8 +58,7 @@ inline uint64_t calculate_messages(uint32_t msg_size, uint64_t target_bytes = TA
 inline double now_seconds() {
     using clock = std::chrono::steady_clock;
     static const auto t0 = clock::now();
-    const auto t = clock::now() - t0;
-    return std::chrono::duration<double>(t).count();
+    return std::chrono::duration<double>(clock::now() - t0).count();
 }
 
 inline void close_fd(int fd) {
@@ -136,9 +153,9 @@ inline bool recv_round_config(int fd, RoundConfig& cfg) {
            recv_u64(fd, cfg.measured_messages);
 }
 
-inline int connect_to_server(const std::string& host, uint16_t port) {
+inline int connect_to_server(const std::string& host, uint16_t port = DEFAULT_PORT) {
     addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_UNSPEC; // accepts IPv4 or IPv6 server addresses
     hints.ai_socktype = SOCK_STREAM;
 
     addrinfo* result = nullptr;
@@ -165,21 +182,18 @@ inline int connect_to_server(const std::string& host, uint16_t port) {
     return -1;
 }
 
-inline int create_listening_socket(uint16_t port) {
-    int fd = socket(AF_INET6, SOCK_STREAM, 0);
+inline int create_listening_socket(uint16_t port = DEFAULT_PORT) {
+    // IPv4 is used deliberately because some test environments disable IPv6.
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) throw_errno("socket failed");
 
     int opt = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    // Allow IPv4 clients too, when the OS supports dual-stack sockets.
-    int off = 0;
-    setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
-
-    sockaddr_in6 addr{};
-    addr.sin6_family = AF_INET6;
-    addr.sin6_addr = in6addr_any;
-    addr.sin6_port = htons(port);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
 
     if (bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         close_fd(fd);
@@ -209,13 +223,11 @@ inline bool drain_bytes(int fd, uint64_t total_bytes, std::vector<char>& buffer)
 }
 
 inline void print_usage_client(const char* argv0) {
-    std::cerr << "Usage: " << argv0 << " [server-host] [port] [target-MiB-per-size]\n"
-              << "Example: " << argv0 << " 127.0.0.1 8080 256\n";
+    std::cerr << "Usage: " << argv0 << " <server-ip-or-hostname>\n";
 }
 
 inline void print_usage_server(const char* argv0) {
-    std::cerr << "Usage: " << argv0 << " [port]\n"
-              << "Example: " << argv0 << " 8080\n";
+    std::cerr << "Usage: " << argv0 << "\n";
 }
 
 } // namespace bench

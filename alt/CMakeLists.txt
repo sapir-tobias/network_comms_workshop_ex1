@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.15)
-project(TCPBenchmarkFinal CXX)
+project(TcpThroughputBenchmark CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(benchmark_server benchmark_server.cpp)
-add_executable(benchmark_client benchmark_client.cpp)
+add_executable(server benchmark_server.cpp)
+add_executable(client benchmark_client.cpp)
+
+target_compile_options(server PRIVATE -O2 -Wall -Wextra -pedantic)
+target_compile_options(client PRIVATE -O2 -Wall -Wextra -pedantic)
