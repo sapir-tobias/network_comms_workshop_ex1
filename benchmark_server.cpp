@@ -9,6 +9,7 @@ int main(int argc, char* argv[]) {
 
         int server_fd = bench::create_listening_socket();
 
+        // accept one client and run benchmark protocol with it
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
         int client_fd = accept(server_fd, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
@@ -27,11 +28,13 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("client requested message size above MAX_MSG_SIZE");
             }
 
+            // calculate bytes to recv
             const uint64_t warmup_bytes = static_cast<uint64_t>(cfg.msg_size) *
                                           cfg.warmup_messages;
             const uint64_t measured_bytes = static_cast<uint64_t>(cfg.msg_size) *
                                             cfg.measured_messages;
 
+            // drain warmup and measured messages, ack each phase
             if (!bench::drain_bytes(client_fd, warmup_bytes, buffer)) {
                 throw std::runtime_error("client disconnected during warmup");
             }
@@ -47,6 +50,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // closing up shop
         bench::close_fd(client_fd);
         bench::close_fd(server_fd);
         return 0;

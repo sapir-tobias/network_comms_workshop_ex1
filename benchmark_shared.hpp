@@ -20,25 +20,12 @@ constexpr uint32_t MIN_MSG_SIZE = 1;        // 1 byte
 constexpr uint32_t MAX_MSG_SIZE = 1u << 20; // 1 MiB
 
 /*
- * Warm-up choice:
- * Before timing each message size, the client sends a small fixed burst of
- * messages. These messages are not included in the measured time. This reduces
- * cold-start effects such as TCP buffer initialization, cache effects, and first
- * scheduling delays. 256 messages is small compared to the measured phase, but
- * enough to make every round start from a more stable state.
+ * relative to the measured phase, 256 is not very long but also enough to acquire stability
  */
 constexpr uint64_t WARMUP_MESSAGES = 256;
 
-/*
- * X choice:
- * For every message size we try to send approximately TARGET_BYTES_PER_ROUND
- * bytes in the measured phase. Thus X = target_bytes / msg_size. This keeps the
- * amount of data comparable between sizes. For very small messages this would
- * create too many system calls, so X is capped. For very large messages we keep
- * at least a few repetitions so the measurement is not based on a single send.
- */
 constexpr uint64_t TARGET_BYTES_PER_ROUND = 256ull * 1024ull * 1024ull; // 256 MiB
-constexpr uint64_t MIN_MESSAGES_PER_ROUND = 16;
+constexpr uint64_t MIN_MESSAGES_PER_ROUND = 16ull;
 constexpr uint64_t MAX_MESSAGES_PER_ROUND = 8ull * 1024ull * 1024ull;
 
 struct RoundConfig {
@@ -47,6 +34,7 @@ struct RoundConfig {
     uint64_t measured_messages;
 };
 
+// calc number of messages to send in measured phase and cap it
 inline uint64_t calculate_messages(uint32_t msg_size,
                                    uint64_t target_bytes = TARGET_BYTES_PER_ROUND) {
     uint64_t x = target_bytes / msg_size;
@@ -55,20 +43,14 @@ inline uint64_t calculate_messages(uint32_t msg_size,
     return x;
 }
 
+// time
 inline double now_seconds() {
     using clock = std::chrono::steady_clock;
     static const auto t0 = clock::now();
     return std::chrono::duration<double>(clock::now() - t0).count();
 }
 
-inline void close_fd(int fd) {
-    if (fd >= 0) close(fd);
-}
-
-inline void throw_errno(const std::string& what) {
-    throw std::runtime_error(what + ": " + std::strerror(errno));
-}
-
+// send and receive utilities
 inline bool send_all(int fd, const void* data, size_t len) {
     const char* p = static_cast<const char*>(data);
     while (len > 0) {
@@ -99,6 +81,8 @@ inline bool recv_all(int fd, void* data, size_t len) {
     return true;
 }
 
+// network byte order utilities - not very important for this benchmark
+// but good practice from what I saw online :)
 inline uint64_t htonll(uint64_t x) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     return (static_cast<uint64_t>(htonl(static_cast<uint32_t>(x & 0xffffffffull))) << 32) |
@@ -117,6 +101,7 @@ inline uint64_t ntohll(uint64_t x) {
 #endif
 }
 
+// abstraction utilities
 inline bool send_u32(int fd, uint32_t x) {
     uint32_t net = htonl(x);
     return send_all(fd, &net, sizeof(net));
@@ -141,6 +126,7 @@ inline bool recv_u64(int fd, uint64_t& x) {
     return true;
 }
 
+// protocol utilities
 inline bool send_round_config(int fd, const RoundConfig& cfg) {
     return send_u32(fd, cfg.msg_size) &&
            send_u64(fd, cfg.warmup_messages) &&
@@ -153,6 +139,7 @@ inline bool recv_round_config(int fd, RoundConfig& cfg) {
            recv_u64(fd, cfg.measured_messages);
 }
 
+// connect to server
 inline int connect_to_server(const std::string& host, uint16_t port = DEFAULT_PORT) {
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC; // accepts IPv4 or IPv6 server addresses
@@ -182,6 +169,7 @@ inline int connect_to_server(const std::string& host, uint16_t port = DEFAULT_PO
     return -1;
 }
 
+// create listening socket
 inline int create_listening_socket(uint16_t port = DEFAULT_PORT) {
     // IPv4 is used deliberately because some test environments disable IPv6.
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -206,6 +194,7 @@ inline int create_listening_socket(uint16_t port = DEFAULT_PORT) {
     return fd;
 }
 
+// read and discard message bytes until total_bytes is drained, or an error occurs
 inline bool drain_bytes(int fd, uint64_t total_bytes, std::vector<char>& buffer) {
     while (total_bytes > 0) {
         size_t want = buffer.size();
@@ -222,6 +211,7 @@ inline bool drain_bytes(int fd, uint64_t total_bytes, std::vector<char>& buffer)
     return true;
 }
 
+// printing and error handling
 inline void print_usage_client(const char* argv0) {
     std::cerr << "Usage: " << argv0 << " <server-ip-or-hostname>\n";
 }
@@ -230,4 +220,12 @@ inline void print_usage_server(const char* argv0) {
     std::cerr << "Usage: " << argv0 << "\n";
 }
 
-} // namespace bench
+inline void close_fd(int fd) {
+    if (fd >= 0) close(fd);
+}
+
+inline void throw_errno(const std::string& what) {
+    throw std::runtime_error(what + ": " + std::strerror(errno));
+}
+
+}
