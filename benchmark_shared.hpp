@@ -34,6 +34,7 @@ struct RoundConfig {
     uint64_t measured_messages;
 };
 
+
 // calc number of messages to send in measured phase and cap it
 inline uint64_t calculate_messages(uint32_t msg_size,
                                    uint64_t target_bytes = TARGET_BYTES_PER_ROUND) {
@@ -139,6 +140,15 @@ inline bool recv_round_config(int fd, RoundConfig& cfg) {
            recv_u64(fd, cfg.measured_messages);
 }
 
+// utils
+inline void close_fd(int fd) {
+    if (fd >= 0) close(fd);
+}
+
+inline void throw_errno(const std::string& what) {
+    throw std::runtime_error(what + ": " + std::strerror(errno));
+}
+
 // connect to server
 inline int connect_to_server(const std::string& host, uint16_t port = DEFAULT_PORT) {
     addrinfo hints{};
@@ -220,12 +230,5 @@ inline void print_usage_server(const char* argv0) {
     std::cerr << "Usage: " << argv0 << "\n";
 }
 
-inline void close_fd(int fd) {
-    if (fd >= 0) close(fd);
-}
-
-inline void throw_errno(const std::string& what) {
-    throw std::runtime_error(what + ": " + std::strerror(errno));
-}
 
 }
