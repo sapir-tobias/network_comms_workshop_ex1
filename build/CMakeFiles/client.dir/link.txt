@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/client.dir/tcp_client.cpp.o -o client 
